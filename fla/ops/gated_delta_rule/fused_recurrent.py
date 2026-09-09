@@ -197,6 +197,7 @@ def fused_recurrent_gated_delta_rule_fwd(
     allow_neg_eigval: bool = False,
     state_v_first: bool = False,
     cu_seqlens: torch.LongTensor | None = None,
+    inplace_final_state: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     B, T, H, K, V = *k.shape, v.shape[-1]
     HV = v.shape[2]
@@ -207,7 +208,9 @@ def fused_recurrent_gated_delta_rule_fwd(
 
     o = torch.empty_like(v)
     if output_final_state:
-        if state_v_first:
+        if inplace_final_state:
+            final_state = initial_state
+        elif state_v_first:
             final_state = q.new_empty(N, HV, V, K, dtype=torch.float32)
         else:
             final_state = q.new_empty(N, HV, K, V, dtype=torch.float32)
@@ -271,6 +274,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
         allow_neg_eigval: bool = False,
         state_v_first: bool = False,
         cu_seqlens: torch.LongTensor | None = None,
+        inplace_final_state: bool = False,
     ):
         o, final_state = fused_recurrent_gated_delta_rule_fwd(
             q=q,
@@ -290,6 +294,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
             allow_neg_eigval=allow_neg_eigval,
             state_v_first=state_v_first,
             cu_seqlens=cu_seqlens,
+            inplace_final_state=inplace_final_state,
         )
 
         return o, final_state
@@ -323,6 +328,7 @@ def fused_recurrent_gated_delta_rule(
     allow_neg_eigval: bool = False,
     state_v_first: bool = False,
     cu_seqlens: torch.LongTensor | None = None,
+    inplace_final_state: bool = False,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""
@@ -376,6 +382,9 @@ def fused_recurrent_gated_delta_rule(
             the kernel computes `2 * sigmoid(beta)` instead of `sigmoid(beta)`. Default: `False`.
         state_v_first (Optional[bool]):
             Store the recurrent state in V-first ``[V, K]`` layout instead of the default ``[K, V]``. Default: ``False``.
+        inplace_final_state (bool):
+            Write the final state into `initial_state` instead of a new tensor, so decoding steps carry their
+            state without copies. Requires `initial_state` and `output_final_state=True`. Default: `False`.
         cu_seqlens (torch.LongTensor):
             Cumulative sequence lengths of shape `[N+1]` used for variable-length training,
             consistent with the FlashAttention API.
@@ -450,6 +459,11 @@ def fused_recurrent_gated_delta_rule(
         dt_bias = None
     if allow_neg_eigval and not use_beta_sigmoid_in_kernel:
         raise ValueError("`allow_neg_eigval=True` requires `use_beta_sigmoid_in_kernel=True`.")
+    if inplace_final_state:
+        if initial_state is None or not output_final_state:
+            raise ValueError("`inplace_final_state=True` writes the final state into `initial_state`, which must be given, and requires `output_final_state=True`.")
+        if initial_state.requires_grad or not initial_state.is_contiguous():
+            raise ValueError("`inplace_final_state=True` overwrites `initial_state`, which must be contiguous and must not require grad.")
 
     o, final_state = FusedRecurrentFunction.apply(
         q,
@@ -469,6 +483,7 @@ def fused_recurrent_gated_delta_rule(
         allow_neg_eigval,
         state_v_first,
         cu_seqlens,
+        inplace_final_state,
     )
     return o, final_state
 
