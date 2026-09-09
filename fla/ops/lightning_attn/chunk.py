@@ -7,10 +7,12 @@
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.ops.simple_gla.chunk import chunk_simple_gla
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_lightning_attn(
     q: torch.Tensor,
     k: torch.Tensor,

@@ -7,6 +7,8 @@
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
 from fla.ops.comba.utils import chunk_comba_cumsum_scalar_bwd, chunk_comba_cumsum_scalar_fwd
 from fla.ops.comba.wy_fast import chunk_scaled_dot_comba_pkt_fwd, prepare_wy_repr_bwd, recompute_w_u_fwd
@@ -290,7 +292,7 @@ class ChunkCombaFunction(torch.autograd.Function):
         return dq.to(q), dk.to(k), dv.to(v), dp.to(p), dg.to(g), db.to(beta), None, dh0, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_comba(
     q: torch.Tensor,
     k: torch.Tensor,

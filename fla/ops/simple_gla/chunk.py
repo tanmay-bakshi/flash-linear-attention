@@ -7,6 +7,8 @@
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.ops.common.chunk_h import chunk_bwd_dh, chunk_fwd_h
 from fla.ops.common.chunk_o import chunk_bwd_dqkwg, chunk_bwd_dv, chunk_fwd_o
 from fla.ops.utils import chunk_local_cumsum, prepare_chunk_indices
@@ -234,7 +236,7 @@ class ChunkSimpleGLAFunction(torch.autograd.Function):
         return dq.to(q), dk.to(k), dv.to(v), dg, None, None, dh0, None, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_simple_gla(
     q: torch.Tensor,
     k: torch.Tensor,

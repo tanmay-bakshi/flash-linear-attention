@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 from einops import reduce
@@ -1120,7 +1122,7 @@ class ChunkGSAFunction(torch.autograd.Function):
         return dq, dk, dv, ds, dg, None, dhk0, dhv0, None, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_gsa(
     q: torch.Tensor,
     k: torch.Tensor,

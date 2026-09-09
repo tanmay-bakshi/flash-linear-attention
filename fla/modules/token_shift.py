@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -533,7 +535,7 @@ class TokenShift(torch.autograd.Function):
         return dx, None, grad_cache, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def token_shift(
     x: torch.Tensor,
     cu_seqlens: torch.LongTensor | None = None,

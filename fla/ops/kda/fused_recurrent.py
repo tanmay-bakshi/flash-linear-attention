@@ -10,6 +10,8 @@
 import warnings
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -230,7 +232,7 @@ def fused_recurrent_kda_fwd_kernel(
             tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
 
 
-@torch.compiler.disable
+@compiler_disable
 def fused_recurrent_kda_fwd(
     q: torch.Tensor,
     k: torch.Tensor,

@@ -11,6 +11,8 @@ import inspect
 from typing import Any
 
 import torch
+
+from fla.utils import compiler_disable
 import transformers
 from packaging import version
 from transformers.cache_utils import Cache as HFCacheBase
@@ -340,7 +342,7 @@ class LegacyFLACache(HFCacheBase):
         return tuple(self.states)
 
     @classmethod
-    @torch.compiler.disable
+    @compiler_disable
     def from_legacy_cache(
         cls,
         past_key_values: tuple | None = None,
@@ -451,7 +453,7 @@ class FLACache(HFCacheBase):
         return tuple(self[i] for i in range(len(self.layers)))
 
     @classmethod
-    @torch.compiler.disable
+    @compiler_disable
     def from_legacy_cache(
         cls,
         past_key_values: tuple[dict[str, Any], ...] | None = None,

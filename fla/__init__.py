@@ -9,7 +9,7 @@ import importlib
 from pkgutil import extend_path
 
 __path__ = extend_path(__path__, __name__)
-__version__ = "0.5.2"
+__version__ = "0.5.2+lazyimports"
 
 __all__: list[str] = []
 
@@ -26,19 +26,16 @@ def _import_optional_public_module(module_name: str):
         raise
 
 
-def _export_public_api(module) -> None:
-    globals()[module.__name__.rsplit('.', maxsplit=1)[-1]] = module
-    for name in module.__all__:
-        if name.endswith('Config'):
-            continue
-        globals()[name] = getattr(module, name)
-        __all__.append(name)
+_PUBLIC_MODULES = ('fla.layers', 'fla.models')
 
 
-_layers = _import_optional_public_module('fla.layers')
-_models = _import_optional_public_module('fla.models')
-if _layers is not None and _models is not None:
-    _export_public_api(_layers)
-    _export_public_api(_models)
-
-del _import_optional_public_module, _export_public_api, _layers, _models
+def __getattr__(name: str):
+    """Resolves layers and models on first access; importing them eagerly would pull in transformers and
+    every kernel family for users who only want a kernel."""
+    if name in ('layers', 'models'):
+        return importlib.import_module(f'fla.{name}')
+    for module_name in _PUBLIC_MODULES:
+        module = _import_optional_public_module(module_name)
+        if module is not None and name in module.__all__:
+            return getattr(module, name)
+    raise AttributeError(f"module 'fla' has no attribute {name!r}")

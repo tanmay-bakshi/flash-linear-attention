@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -441,7 +443,7 @@ class ChunkGeneralizedIPLRDeltaRuleFunction(torch.autograd.Function):
         )
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_iplr_delta_rule(
     q: torch.Tensor,
     k: torch.Tensor,

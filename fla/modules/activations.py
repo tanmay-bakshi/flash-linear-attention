@@ -13,6 +13,8 @@ An inner-contiguous input — such as one half of ``x.chunk(2, dim=-1)`` — is 
 """
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn.functional as F
 import triton
 import triton.language as tl
@@ -831,7 +833,7 @@ def sigmoidglu_fwdbwd_kernel(
         tl.store(z + row * stride_z_row + col, b_z.to(z.dtype.element_ty), mask=mask)
 
 
-@torch.compiler.disable
+@compiler_disable
 def sigmoidglu_fwd(x: torch.Tensor, y: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     assert x.shape == y.shape, f"sigmoidglu_fwd: shape mismatch x={x.shape} y={y.shape}"
     x = _ensure_inner_contiguous(x)
@@ -851,7 +853,7 @@ def sigmoidglu_fwd(x: torch.Tensor, y: torch.Tensor, output_contiguous: bool = F
     return z
 
 
-@torch.compiler.disable
+@compiler_disable
 def sigmoidglu_fwdbwd(
     x: torch.Tensor,
     y: torch.Tensor,

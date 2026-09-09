@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 from einops import reduce
 
 from fla.ops.attn.parallel import parallel_attn_bwd_preprocess
@@ -221,7 +223,7 @@ class ParallelPATHAttentionFunction(torch.autograd.Function):
                 None, None, None, None)
 
 
-@torch.compiler.disable
+@compiler_disable
 def parallel_path_attn(
     q: torch.Tensor,
     k: torch.Tensor,

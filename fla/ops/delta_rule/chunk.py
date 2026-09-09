@@ -7,6 +7,8 @@
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
 from fla.ops.common.chunk_delta_h import chunk_gated_delta_rule_bwd_dhu, chunk_gated_delta_rule_fwd_h
 from fla.ops.common.chunk_o import chunk_bwd_dqkwg, chunk_bwd_dv_local, chunk_fwd_o
@@ -223,7 +225,7 @@ class ChunkDeltaRuleFunction(torch.autograd.Function):
         return dq.to(q.dtype), dk.to(k.dtype), dv.to(v.dtype), db.to(beta.dtype), None, dh0, None, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_delta_rule(
     q: torch.Tensor,
     k: torch.Tensor,

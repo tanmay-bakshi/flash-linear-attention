@@ -8,6 +8,8 @@
 # This file is modified and supported by the Moonshot AI Team
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn.functional as F
 import triton
 import triton.language as tl
@@ -329,7 +331,7 @@ class KDAGateFunction(torch.autograd.Function):
 
 
 @dispatch('kda')
-@torch.compiler.disable
+@compiler_disable
 def fused_kda_gate(
     g: torch.Tensor,
     A_log: torch.Tensor,

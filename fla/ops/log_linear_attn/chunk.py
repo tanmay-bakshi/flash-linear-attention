@@ -10,6 +10,8 @@ import warnings
 from dataclasses import dataclass
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn.functional as F
 import triton
 import triton.language as tl
@@ -1450,7 +1452,7 @@ class ChunkLogLinearAttentionFunction(torch.autograd.Function):
         return dq, dk, dv, dg, dl, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_log_linear_attn(
     q: torch.Tensor,
     k: torch.Tensor,

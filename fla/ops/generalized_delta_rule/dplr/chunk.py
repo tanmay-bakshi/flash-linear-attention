@@ -9,6 +9,8 @@ import warnings
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.ops.cp import FLACPContext
 from fla.ops.cp.chunk_delta_h import (
     chunk_gated_delta_rule_bwd_dhu_pre_process,
@@ -438,7 +440,7 @@ class ChunkDPLRDeltaRuleFunction(torch.autograd.Function):
         )
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_dplr_delta_rule(
     q: torch.Tensor,
     k: torch.Tensor,

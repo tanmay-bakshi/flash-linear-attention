@@ -11,6 +11,8 @@ import warnings
 from typing import TYPE_CHECKING
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn as nn
 from einops import rearrange
 from torch.nn import functional as F
@@ -153,7 +155,7 @@ class RWKV7Attention(nn.Module):
         )
 
     @torch.no_grad()
-    @torch.compiler.disable
+    @compiler_disable
     def _initialize_weights(self, module: nn.Module):
         if getattr(module, "_is_hf_initialized", False):
             return

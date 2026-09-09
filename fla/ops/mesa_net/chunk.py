@@ -7,6 +7,8 @@
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
 from fla.ops.common.chunk_h import chunk_bwd_dh
 from fla.ops.mesa_net.chunk_cg_solver_bwd import chunk_mesa_cg_bwd
@@ -303,7 +305,7 @@ class ChunkMesaNetFunction(torch.autograd.Function):
         return dq, dk, dv.to(v), dg.to(g), dbeta.to(beta), dlamb.to(lamb), None, None, None, dh0_kk, dh0_kv, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_mesa_net(
     q: torch.Tensor,
     k: torch.Tensor,

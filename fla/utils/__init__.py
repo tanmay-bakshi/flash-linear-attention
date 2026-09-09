@@ -25,6 +25,7 @@ from ._config import (  # noqa: F401
 from ._decorators import (  # noqa: F401
     Action,
     checkpoint,
+    compiler_disable,
     contiguous,
     deprecate_kwarg,
     input_guard,

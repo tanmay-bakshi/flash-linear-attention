@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn.functional as F
 import triton
 import triton.language as tl
@@ -316,7 +318,7 @@ class GDNGateFunction(torch.autograd.Function):
         return dg, dA, dbias, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def fused_gdn_gate(
     g: torch.Tensor,
     A_log: torch.Tensor,

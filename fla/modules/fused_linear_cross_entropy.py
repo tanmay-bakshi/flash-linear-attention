@@ -11,6 +11,8 @@
 from functools import partial
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn as nn
 import torch.nn.functional as F
 import triton
@@ -676,7 +678,7 @@ class FusedLinearCrossEntropyLoss(nn.Module):
         self.l2_penalty_factor = l2_penalty_factor
         self.accumulate_grad_in_fp32 = accumulate_grad_in_fp32
 
-    @torch.compiler.disable
+    @compiler_disable
     def forward(
         self,
         x: torch.Tensor,

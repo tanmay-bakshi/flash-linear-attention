@@ -11,6 +11,8 @@ import warnings
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
 from fla.ops.backends import dispatch
 from fla.ops.common.gate import fused_beta_sigmoid, fused_beta_sigmoid_bwd
@@ -174,7 +176,7 @@ class ChunkKDAFunction(torch.autograd.Function):
 
 
 @dispatch('kda')
-@torch.compiler.disable
+@compiler_disable
 def chunk_kda(
     q: torch.Tensor,
     k: torch.Tensor,

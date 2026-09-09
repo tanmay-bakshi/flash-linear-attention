@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -1416,7 +1418,7 @@ class ChunkGLAFunction(torch.autograd.Function):
         return dq.to(q), dk.to(k), dv.to(v), dg, None, dh0, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_gla(
     q: torch.Tensor,
     k: torch.Tensor,

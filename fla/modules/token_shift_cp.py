@@ -17,6 +17,8 @@ Backward: non-last ranks need to send the last token's gradient to previous rank
 """
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.distributed as dist
 
 from fla.modules.token_shift import token_shift_bwd, token_shift_fwd
@@ -200,7 +202,7 @@ class TokenShiftCPFunction(torch.autograd.Function):
         return dx, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def token_shift_cp(
     x: torch.Tensor,
     cp_context: FLACPContext,

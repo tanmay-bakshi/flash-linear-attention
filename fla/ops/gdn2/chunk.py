@@ -29,6 +29,8 @@ import warnings
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
 from fla.ops.gdn2.chunk_bwd import chunk_gdn2_bwd
 from fla.ops.gdn2.chunk_fwd import chunk_gdn2_fwd
@@ -191,7 +193,7 @@ class ChunkGDN2Function(torch.autograd.Function):
         )
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_gdn2(
     q: torch.Tensor,
     k: torch.Tensor,

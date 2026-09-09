@@ -24,6 +24,8 @@
 
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -283,7 +285,7 @@ class ChunkHGRNFunction(torch.autograd.Function):
         return dx.to(o.dtype), dg, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_hgrn(
     x: torch.Tensor,
     g: torch.Tensor,

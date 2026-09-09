@@ -8,6 +8,8 @@
 """Beta-sigmoid gate kernels adapted for triton-ascend on Ascend NPU."""
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -61,7 +63,7 @@ def fused_beta_sigmoid_bwd_kernel(
     tl.store(dx + offs, b_dx.to(dx.dtype.element_ty), mask=mask)
 
 
-@torch.compiler.disable
+@compiler_disable
 def fused_beta_sigmoid_fwd_npu(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
     x = x.contiguous()
     y = torch.empty_like(x, dtype=torch.float32)
@@ -77,7 +79,7 @@ def fused_beta_sigmoid_fwd_npu(x: torch.Tensor, scale: float = 1.0) -> torch.Ten
     return y
 
 
-@torch.compiler.disable
+@compiler_disable
 def fused_beta_sigmoid_bwd_npu(
     x: torch.Tensor,
     dy: torch.Tensor,

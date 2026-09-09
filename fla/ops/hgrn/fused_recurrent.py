@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -254,7 +256,7 @@ class FusedRecurrentHGRNFunction(torch.autograd.Function):
         return dx, dg, dh0, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def fused_recurrent_hgrn(
     x: torch.Tensor,
     g: torch.Tensor,

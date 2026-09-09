@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -249,7 +251,7 @@ class GateOutputCorrection(torch.autograd.Function):
         return gate_output_correction_backward_triton(grad_output, o, r, k, r_k, v, g)
 
 
-@torch.compiler.disable
+@compiler_disable
 def gate_output_correction(
     o: torch.Tensor,
     r: torch.Tensor,

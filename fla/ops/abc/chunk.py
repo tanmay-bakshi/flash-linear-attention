@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 import triton
 import triton.language as tl
 
@@ -1194,7 +1196,7 @@ class ChunkABCFunction(torch.autograd.Function):
         return dq, dk, dv, ds, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_abc(
     q: torch.Tensor,
     k: torch.Tensor,

@@ -6,6 +6,8 @@
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
 import torch
+
+from fla.utils import compiler_disable
 from einops import rearrange
 
 from fla.modules.l2norm import l2norm_bwd, l2norm_fwd
@@ -255,7 +257,7 @@ class ChunkGatedDeltaProductFunction(torch.autograd.Function):
         return dq.to(q), dk.to(k), dv.to(v), dg, db.to(beta), None, None, dh0, None, None, None, None
 
 
-@torch.compiler.disable
+@compiler_disable
 def chunk_gated_delta_product(
     q: torch.Tensor,
     k: torch.Tensor,

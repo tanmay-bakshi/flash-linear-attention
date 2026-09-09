@@ -30,6 +30,20 @@ class Action(Enum):
     RAISE = "raise"
 
 
+def compiler_disable(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Keeps ``fn`` out of torch.compile graphs without importing dynamo at decoration time: dynamo is
+    consulted only when it is already loaded and tracing, the one situation in which it matters."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        dynamo = sys.modules.get("torch._dynamo")
+        if dynamo is not None and dynamo.is_compiling():
+            return dynamo.disable(fn)(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
 def tensor_cache(
     fn: Callable[..., torch.Tensor],
 ) -> Callable[..., torch.Tensor]:

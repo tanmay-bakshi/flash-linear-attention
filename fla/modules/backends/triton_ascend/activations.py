@@ -8,6 +8,8 @@
 """Activation kernels adapted for triton-ascend on Huawei NPU."""
 
 import torch
+
+from fla.utils import compiler_disable
 import torch.nn.functional as F
 import triton
 import triton.language as tl
@@ -352,7 +354,7 @@ def swiglu_fwdbwd_kernel(
         tl.store(z + z_off, z_val.to(z.dtype.element_ty), mask=mask)
 
 
-@torch.compiler.disable
+@compiler_disable
 def sigmoid_fwd_npu(x: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     x = _ensure_inner_contiguous(x)
     T, D = x.numel(), x.shape[-1]
@@ -367,7 +369,7 @@ def sigmoid_fwd_npu(x: torch.Tensor, output_contiguous: bool = False) -> torch.T
     return y
 
 
-@torch.compiler.disable
+@compiler_disable
 def sigmoid_bwd_npu(x: torch.Tensor, dy: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     x = _ensure_inner_contiguous(x)
     dy = _ensure_inner_contiguous(dy)
@@ -384,7 +386,7 @@ def sigmoid_bwd_npu(x: torch.Tensor, dy: torch.Tensor, output_contiguous: bool =
     return dx
 
 
-@torch.compiler.disable
+@compiler_disable
 def logsigmoid_fwd_npu(x: torch.Tensor, temperature: float = 1., output_contiguous: bool = False) -> torch.Tensor:
     x = _ensure_inner_contiguous(x)
     T, D = x.numel(), x.shape[-1]
@@ -403,7 +405,7 @@ def logsigmoid_fwd_npu(x: torch.Tensor, temperature: float = 1., output_contiguo
     return y
 
 
-@torch.compiler.disable
+@compiler_disable
 def logsigmoid_bwd_npu(
     x: torch.Tensor,
     dy: torch.Tensor,
@@ -430,7 +432,7 @@ def logsigmoid_bwd_npu(
     return dx
 
 
-@torch.compiler.disable
+@compiler_disable
 def swish_fwd_npu(x: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     x = _ensure_inner_contiguous(x)
     T, D = x.numel(), x.shape[-1]
@@ -445,7 +447,7 @@ def swish_fwd_npu(x: torch.Tensor, output_contiguous: bool = False) -> torch.Ten
     return y
 
 
-@torch.compiler.disable
+@compiler_disable
 def swish_bwd_npu(x: torch.Tensor, dy: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     x = _ensure_inner_contiguous(x)
     dy = _ensure_inner_contiguous(dy)
@@ -462,7 +464,7 @@ def swish_bwd_npu(x: torch.Tensor, dy: torch.Tensor, output_contiguous: bool = F
     return dx
 
 
-@torch.compiler.disable
+@compiler_disable
 def swiglu_fwd_npu(x: torch.Tensor, y: torch.Tensor, output_contiguous: bool = False) -> torch.Tensor:
     assert x.shape == y.shape, f"swiglu_fwd: shape mismatch x={x.shape} y={y.shape}"
     x = _ensure_inner_contiguous(x)
@@ -480,7 +482,7 @@ def swiglu_fwd_npu(x: torch.Tensor, y: torch.Tensor, output_contiguous: bool = F
     return z
 
 
-@torch.compiler.disable
+@compiler_disable
 def swiglu_fwdbwd_npu(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -651,7 +653,7 @@ _POWGLU_FWD_MEM_MULT = 8.0
 _POWGLU_BWD_MEM_MULT = 10.0
 
 
-@torch.compiler.disable
+@compiler_disable
 def powglu_fwd_npu(x: torch.Tensor, y: torch.Tensor, power: float = 3.0, output_contiguous: bool = False) -> torch.Tensor:
     assert x.shape == y.shape, f"powglu_fwd: shape mismatch x={x.shape} y={y.shape}"
     x = _ensure_inner_contiguous(x)
@@ -674,7 +676,7 @@ def powglu_fwd_npu(x: torch.Tensor, y: torch.Tensor, power: float = 3.0, output_
     return z
 
 
-@torch.compiler.disable
+@compiler_disable
 def powglu_fwdbwd_npu(
     x: torch.Tensor,
     y: torch.Tensor,

@@ -19,6 +19,8 @@ from typing import Any, ClassVar, TypeVar
 
 import torch
 
+from fla.utils import compiler_disable
+
 from fla.utils import find_spec_cached
 
 logger = logging.getLogger(__name__)
@@ -214,7 +216,7 @@ def dispatch(operation: str):
             return func(*args, **kwargs)
 
         # Dispatch performs runtime backend selection; keep it out of torch.compile graphs.
-        wrapper = torch.compiler.disable(wrapper)
+        wrapper = compiler_disable(wrapper)
 
         return wrapper
     return decorator
