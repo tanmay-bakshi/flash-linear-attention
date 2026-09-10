@@ -9,21 +9,21 @@ import torch
 import triton
 import triton.language as tl
 
-from fla.utils import IS_TF32_SUPPORTED
-
-FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
-
 from fla.ops.common.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.cache import fla_cache_autotune
 from fla.ops.utils.op import exp2
 from fla.utils import (
     IS_NVIDIA_HOPPER,
+    IS_NVIDIA_SM100,
+    IS_TF32_SUPPORTED,
     TRITON_ABOVE_3_4_0,
     TRITON_ABOVE_3_7_1,
     autotune_cache_kwargs,
     check_shared_mem,
 )
+
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
 
 BKV_LIST = [64, 128] if check_shared_mem() else ([32, 64] if check_shared_mem('ada') else [32])
 NUM_WARPS = [2, 4] if IS_NVIDIA_HOPPER else [2, 4, 8]
@@ -704,7 +704,11 @@ def chunk_bwd_dqkwg(
     cu_seqlens: torch.LongTensor | None = None,
     chunk_size: int = 64,
     chunk_indices: torch.LongTensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+    """Differentiate the chunk outputs and the state at each chunk boundary.
+
+    :returns: Query, key, optional WY correction, and optional cumulative gate gradients.
+    """
     if g is not None and IS_NVIDIA_HOPPER and TRITON_ABOVE_3_4_0 and not TRITON_ABOVE_3_7_1:
         raise RuntimeError(
             "Triton >= 3.4.0 and < 3.7.1 on Hopper GPUs produces incorrect results for "
@@ -726,6 +730,10 @@ def chunk_bwd_dqkwg(
         CONST_TILING = 32
     BK = min(max(triton.next_power_of_2(K), 16), CONST_TILING)
     BV = min(max(triton.next_power_of_2(V), 16), CONST_TILING)
+    if IS_NVIDIA_SM100 and k.dtype == torch.float32:
+        # TF32x3 expands each operand; bounded tiles keep native matrix multiplies within shared memory.
+        BK = min(BK, 64)
+        BV = min(BV, 32)
     NK = triton.cdiv(K, BK)
     dq = q.new_empty(B, T, HV, K)
     dk = k.new_empty(B, T, HV, K)
