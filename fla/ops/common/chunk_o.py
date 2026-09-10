@@ -9,6 +9,10 @@ import torch
 import triton
 import triton.language as tl
 
+from fla.utils import IS_TF32_SUPPORTED
+
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
+
 from fla.ops.common.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.cache import fla_cache_autotune
@@ -110,11 +114,11 @@ def chunk_fwd_kernel_o(
 
         # [BT, BK] @ [BK, BV] -> [BT, BV]
         if STATE_V_FIRST:
-            b_o += tl.dot(b_q, tl.trans(b_h))
+            b_o += tl.dot(b_q, tl.trans(b_h), input_precision=FP32_DOT_PRECISION)
         else:
-            b_o += tl.dot(b_q, b_h)
+            b_o += tl.dot(b_q, b_h, input_precision=FP32_DOT_PRECISION)
         # [BT, BK] @ [BK, BT] -> [BT, BT]
-        b_A += tl.dot(b_q, b_k)
+        b_A += tl.dot(b_q, b_k, input_precision=FP32_DOT_PRECISION)
 
     if USE_G:
         g += bos * HV + i_h
@@ -136,7 +140,7 @@ def chunk_fwd_kernel_o(
     b_v = tl.load(p_v, mask=m_t[:, None] & (o_v < V)[None, :], other=0.0)
     # to fix mma -> mma layout conversion
     # already solved by triton v3.2 or higher
-    b_o = b_o * scale + tl.dot(b_A.to(b_v.dtype), b_v) * scale
+    b_o = b_o * scale + tl.dot(b_A.to(b_v.dtype), b_v, input_precision=FP32_DOT_PRECISION) * scale
     tl.store(p_o, b_o.to(p_o.dtype.element_ty), mask=m_t[:, None] & (o_v < V)[None, :])
 
 
@@ -257,15 +261,15 @@ def chunk_bwd_kernel_dqkwg(
         if USE_G:
             b_dg_last += (tl.sum(b_h * b_dh))
         # [BT, BV] @ [BV, BT] -> [BT, BT]
-        b_ds += tl.dot(b_do, tl.trans(b_v))
+        b_ds += tl.dot(b_do, tl.trans(b_v), input_precision=FP32_DOT_PRECISION)
         # [BT, BV] @ [BV, BK] -> [BT, BK]
-        b_dq += tl.dot(b_do, b_h.to(b_do.dtype))
+        b_dq += tl.dot(b_do, b_h.to(b_do.dtype), input_precision=FP32_DOT_PRECISION)
         # [BT, BV] @ [BV, BK] -> [BT, BK]
-        b_dk += tl.dot(b_v, b_dh.to(b_v.dtype))
+        b_dk += tl.dot(b_v, b_dh.to(b_v.dtype), input_precision=FP32_DOT_PRECISION)
         if USE_DW:
             p_dv = dv + o_t[:, None] * (HV*V) + o_v[None, :]
             b_dv = tl.load(p_dv, mask=m_hv, other=0.0)
-            b_dw += tl.dot(b_dv.to(b_v.dtype), b_h.to(b_v.dtype))
+            b_dw += tl.dot(b_dv.to(b_v.dtype), b_h.to(b_v.dtype), input_precision=FP32_DOT_PRECISION)
 
     if USE_DW:
         p_dw = dw + o_t[:, None] * (HV*K) + o_k[None, :]
@@ -295,8 +299,8 @@ def chunk_bwd_kernel_dqkwg(
         b_ds = tl.where(m_A, b_ds * exp2(b_g[:, None] - b_g[None, :]), 0) * scale
         b_ds = b_ds.to(b_k.dtype)
         # [BT, BK]
-        b_dq += tl.dot(b_ds, b_k)
-        b_dk += tl.dot(tl.trans(b_ds), b_q)
+        b_dq += tl.dot(b_ds, b_k, input_precision=FP32_DOT_PRECISION)
+        b_dk += tl.dot(tl.trans(b_ds), b_q, input_precision=FP32_DOT_PRECISION)
 
         b_dg = tl.sum(b_dq * b_q, axis=1) - tl.sum(b_dk * b_k, axis=1)
 
@@ -314,16 +318,16 @@ def chunk_bwd_kernel_dqkwg(
         b_ds = tl.where(m_A, b_ds * exp2(b_g[:, None] - b_g[None, :]), 0) * scale
         b_ds = b_ds.to(b_k.dtype)
         # [BT, BK]
-        b_dq += tl.dot(b_ds, b_k)
-        b_dk += tl.dot(tl.trans(b_ds), b_q)
+        b_dq += tl.dot(b_ds, b_k, input_precision=FP32_DOT_PRECISION)
+        b_dk += tl.dot(tl.trans(b_ds), b_q, input_precision=FP32_DOT_PRECISION)
         tl.store(p_dq, b_dq.to(p_dq.dtype.element_ty), mask=m_qk)
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=m_qk)
 
     else:
         b_ds = tl.where(m_A, b_ds, 0)
         b_ds = b_ds.to(b_k.dtype)
-        b_dq += tl.dot(b_ds, b_k)
-        b_dk += tl.dot(tl.trans(b_ds), b_q) * scale
+        b_dq += tl.dot(b_ds, b_k, input_precision=FP32_DOT_PRECISION)
+        b_dk += tl.dot(tl.trans(b_ds), b_q, input_precision=FP32_DOT_PRECISION) * scale
         b_dq *= scale
         tl.store(p_dq, b_dq.to(p_dq.dtype.element_ty), mask=m_qk)
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=m_qk)
@@ -401,14 +405,14 @@ def chunk_bwd_kernel_dv(
         p_q = q + o_k[:, None] + o_t[None, :] * (H*K)
         b_q = tl.load(p_q, mask=m_k[:, None] & m_t[None, :], other=0.0)
         b_k = tl.load(p_k, mask=m_t[:, None] & m_k[None, :], other=0.0)
-        b_A += tl.dot(b_k, b_q)
+        b_A += tl.dot(b_k, b_q, input_precision=FP32_DOT_PRECISION)
         if STATE_V_FIRST:
             p_dh = dh + o_v[:, None] * K + o_k[None, :]
             b_dh = tl.trans(tl.load(p_dh, mask=(o_v[:, None] < V) & m_k[None, :], other=0.0))
         else:
             p_dh = dh + o_k[:, None] * V + o_v[None, :]
             b_dh = tl.load(p_dh, mask=m_k[:, None] & (o_v[None, :] < V), other=0.0)
-        b_dv += tl.dot(b_k, b_dh.to(b_k.dtype))
+        b_dv += tl.dot(b_k, b_dh.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
 
     if USE_G:
         g += bos * HV + i_h
@@ -429,7 +433,7 @@ def chunk_bwd_kernel_dv(
     p_do = do + o_t[:, None] * (HV*V) + o_v[None, :]
     p_dv = dv + o_t[:, None] * (HV*V) + o_v[None, :]
     b_do = tl.load(p_do, mask=m_t[:, None] & (o_v < V)[None, :], other=0.0)
-    b_dv += tl.dot(b_A.to(b_do.dtype), b_do)
+    b_dv += tl.dot(b_A.to(b_do.dtype), b_do, input_precision=FP32_DOT_PRECISION)
     tl.store(p_dv, b_dv.to(p_dv.dtype.element_ty), mask=m_t[:, None] & (o_v < V)[None, :])
 
 
@@ -511,7 +515,7 @@ def chunk_bwd_kernel_dv_local(
 
             b_k = tl.load(p_k, mask=m_t[:, None] & m_k[None, :], other=0.0)
             b_q = tl.load(p_q, mask=m_k[:, None] & m_t[None, :], other=0.0)
-            b_A += tl.dot(b_k, b_q) * scale
+            b_A += tl.dot(b_k, b_q, input_precision=FP32_DOT_PRECISION) * scale
         if USE_G or USE_G_GAMMA:
             b_A *= exp2(b_g[None, :] - b_g[:, None])
     m_A = (o_t[:, None] <= o_t[None, :]) & (m_t[:, None] & m_t)
@@ -523,7 +527,7 @@ def chunk_bwd_kernel_dv_local(
         p_do = do + o_t[:, None] * (HV*V) + o_v[None, :]
         p_dv = dv + o_t[:, None] * (HV*V) + o_v[None, :]
         b_do = tl.load(p_do, mask=m_t[:, None] & m_v[None, :], other=0.0)
-        b_dv = tl.dot(b_A.to(b_do.dtype), b_do)
+        b_dv = tl.dot(b_A.to(b_do.dtype), b_do, input_precision=FP32_DOT_PRECISION)
         tl.store(p_dv, b_dv.to(p_dv.dtype.element_ty), mask=m_t[:, None] & m_v[None, :])
 
 

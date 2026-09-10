@@ -9,6 +9,10 @@ import torch
 import triton
 import triton.language as tl
 
+from fla.utils import IS_TF32_SUPPORTED
+
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
+
 from fla.ops.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.cache import fla_cache_autotune
@@ -98,7 +102,7 @@ def recompute_w_u_fwd_kernel(
         b_kb = b_k * b_b[:, None]
         if USE_G:
             b_kb *= b_g[:, None]
-        b_w = tl.dot(b_A, b_kb.to(b_k.dtype))
+        b_w = tl.dot(b_A, b_kb.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
         tl.store(p_w, b_w.to(p_w.dtype.element_ty), mask=m_k)
 
 
@@ -183,8 +187,8 @@ def prepare_wy_repr_bwd_kernel(
             b_kbg = b_k * b_b[:, None]
         b_dw = tl.load(p_dw, mask=m_k, other=0.0)
 
-        b_dA += tl.dot(b_dw, tl.trans(b_kbg).to(b_dw.dtype))
-        b_dkbg = tl.dot(b_A, b_dw)
+        b_dA += tl.dot(b_dw, tl.trans(b_kbg).to(b_dw.dtype), input_precision=FP32_DOT_PRECISION)
+        b_dkbg = tl.dot(b_A, b_dw, input_precision=FP32_DOT_PRECISION)
         if USE_G:
             b_dk = b_dkbg * (b_g_exp * b_b)[:, None]
             b_db += tl.sum(b_dkbg * b_k * b_g_exp[:, None], 1)
@@ -203,16 +207,16 @@ def prepare_wy_repr_bwd_kernel(
         b_v = tl.load(p_v, mask=m_v, other=0.0)
         b_vb = (b_v * b_b[:, None]).to(b_v.dtype)
         b_du = tl.load(p_du, mask=m_v, other=0.0)
-        b_dA += tl.dot(b_du, tl.trans(b_vb))
-        b_dvb = tl.dot(b_A, b_du)
+        b_dA += tl.dot(b_du, tl.trans(b_vb), input_precision=FP32_DOT_PRECISION)
+        b_dvb = tl.dot(b_A, b_du, input_precision=FP32_DOT_PRECISION)
         b_dv = b_dvb * b_b[:, None]
         b_db += tl.sum(b_dvb * b_v, 1)
         tl.store(p_dv, b_dv.to(p_dv.dtype.element_ty), mask=m_v)
 
     m_A = (o_t[:, None] > o_t[None, :]) & (m_t[:, None] & m_t)
     b_dA = tl.where(m_A, b_dA, 0)
-    b_dA = tl.dot(b_dA.to(b_A.dtype), b_A)
-    b_dA = tl.dot(b_A, b_dA.to(b_A.dtype))
+    b_dA = tl.dot(b_dA.to(b_A.dtype), b_A, input_precision=FP32_DOT_PRECISION)
+    b_dA = tl.dot(b_A, b_dA.to(b_A.dtype), input_precision=FP32_DOT_PRECISION)
 
     if USE_G:
         b_dA *= exp2(b_g[:, None] - b_g[None, :])
@@ -230,10 +234,10 @@ def prepare_wy_repr_bwd_kernel(
         b_kt = tl.trans(b_k)
         b_kb = b_k * b_b[:, None]
 
-        b_A += tl.dot(b_k, b_kt)
-        b_dkb = tl.dot(b_dA, b_k)
+        b_A += tl.dot(b_k, b_kt, input_precision=FP32_DOT_PRECISION)
+        b_dkb = tl.dot(b_dA, b_k, input_precision=FP32_DOT_PRECISION)
         b_db += tl.sum(b_dkb * b_k, 1)
-        b_dk = b_dkb * b_b[:, None] + tl.trans(tl.dot(tl.trans(b_kb).to(b_dA.dtype), b_dA))
+        b_dk = b_dkb * b_b[:, None] + tl.trans(tl.dot(tl.trans(b_kb).to(b_dA.dtype), b_dA, input_precision=FP32_DOT_PRECISION))
         b_dk += tl.load(p_dk, mask=m_k, other=0.0)
 
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=m_k)

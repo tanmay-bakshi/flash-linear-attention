@@ -9,6 +9,10 @@ import torch
 import triton
 import triton.language as tl
 
+from fla.utils import IS_TF32_SUPPORTED
+
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
+
 from fla.ops.backends import dispatch
 from fla.ops.common.chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
 from fla.ops.gated_delta_rule.wy_fast import recompute_w_u_fwd
@@ -18,7 +22,7 @@ from fla.ops.utils.op import exp2
 from fla.utils import IS_TF32_SUPPORTED, autotune_cache_kwargs
 
 if IS_TF32_SUPPORTED:
-    SOLVE_TRIL_DOT_PRECISION = tl.constexpr('tf32')
+    SOLVE_TRIL_DOT_PRECISION = tl.constexpr('tf32x3')
 else:
     SOLVE_TRIL_DOT_PRECISION = tl.constexpr('ieee')
 
@@ -139,34 +143,34 @@ def chunk_gated_delta_rule_fwd_kkt_solve_kernel(
         p_k0 = k + (i_tc0 + o_i)[:, None] * (H*K) + o_k[None, :]
         b_k0 = tl.load(p_k0, mask=m_tc0[:, None] & (o_k[None, :] < K), other=0.0)
         # diagonal block 0
-        b_A00 += tl.dot(b_k0, tl.trans(b_k0))
+        b_A00 += tl.dot(b_k0, tl.trans(b_k0), input_precision=FP32_DOT_PRECISION)
 
         if i_tc1 < T:
             p_k1 = k + (i_tc1 + o_i)[:, None] * (H*K) + o_k[None, :]
             b_k1 = tl.load(p_k1, mask=m_tc1[:, None] & (o_k[None, :] < K), other=0.0)
             # diagonal block 1
-            b_A11 += tl.dot(b_k1, tl.trans(b_k1))
+            b_A11 += tl.dot(b_k1, tl.trans(b_k1), input_precision=FP32_DOT_PRECISION)
             # off-diagonal (1,0)
-            b_A10 += tl.dot(b_k1, tl.trans(b_k0))
+            b_A10 += tl.dot(b_k1, tl.trans(b_k0), input_precision=FP32_DOT_PRECISION)
 
             if i_tc2 < T:
                 p_k2 = k + (i_tc2 + o_i)[:, None] * (H*K) + o_k[None, :]
                 b_k2 = tl.load(p_k2, mask=m_tc2[:, None] & (o_k[None, :] < K), other=0.0)
                 # diagonal block 2
-                b_A22 += tl.dot(b_k2, tl.trans(b_k2))
+                b_A22 += tl.dot(b_k2, tl.trans(b_k2), input_precision=FP32_DOT_PRECISION)
                 # off-diagonal (2,0), (2,1)
-                b_A20 += tl.dot(b_k2, tl.trans(b_k0))
-                b_A21 += tl.dot(b_k2, tl.trans(b_k1))
+                b_A20 += tl.dot(b_k2, tl.trans(b_k0), input_precision=FP32_DOT_PRECISION)
+                b_A21 += tl.dot(b_k2, tl.trans(b_k1), input_precision=FP32_DOT_PRECISION)
 
                 if i_tc3 < T:
                     p_k3 = k + (i_tc3 + o_i)[:, None] * (H*K) + o_k[None, :]
                     b_k3 = tl.load(p_k3, mask=m_tc3[:, None] & (o_k[None, :] < K), other=0.0)
                     # diagonal block 3
-                    b_A33 += tl.dot(b_k3, tl.trans(b_k3))
+                    b_A33 += tl.dot(b_k3, tl.trans(b_k3), input_precision=FP32_DOT_PRECISION)
                     # off-diagonal (3,0), (3,1), (3,2)
-                    b_A30 += tl.dot(b_k3, tl.trans(b_k0))
-                    b_A31 += tl.dot(b_k3, tl.trans(b_k1))
-                    b_A32 += tl.dot(b_k3, tl.trans(b_k2))
+                    b_A30 += tl.dot(b_k3, tl.trans(b_k0), input_precision=FP32_DOT_PRECISION)
+                    b_A31 += tl.dot(b_k3, tl.trans(b_k1), input_precision=FP32_DOT_PRECISION)
+                    b_A32 += tl.dot(b_k3, tl.trans(b_k2), input_precision=FP32_DOT_PRECISION)
 
     ############################################################################
     # Step 2: apply gate and beta scaling

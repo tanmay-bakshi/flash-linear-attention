@@ -9,6 +9,10 @@ import torch
 import triton
 import triton.language as tl
 
+from fla.utils import IS_TF32_SUPPORTED
+
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
+
 from fla.ops.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices, prepare_chunk_offsets
 from fla.ops.utils.cache import fla_cache_autotune
@@ -200,30 +204,30 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         p_w = w + o_t[:, None] * (HV*K) + o_k1[None, :]
         b_w = tl.load(p_w, mask=m_t[:, None] & m_k1[None, :], other=0.0)
         if STATE_V_FIRST:
-            b_v = tl.dot(b_w, tl.trans(b_h1).to(b_w.dtype))
+            b_v = tl.dot(b_w, tl.trans(b_h1).to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         else:
-            b_v = tl.dot(b_w, b_h1.to(b_w.dtype))
+            b_v = tl.dot(b_w, b_h1.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 64:
             p_w = w + o_t[:, None] * (HV*K) + o_k2[None, :]
             b_w = tl.load(p_w, mask=m_t[:, None] & m_k2[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_v += tl.dot(b_w, tl.trans(b_h2).to(b_w.dtype))
+                b_v += tl.dot(b_w, tl.trans(b_h2).to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_v += tl.dot(b_w, b_h2.to(b_w.dtype))
+                b_v += tl.dot(b_w, b_h2.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 128:
             p_w = w + o_t[:, None] * (HV*K) + o_k3[None, :]
             b_w = tl.load(p_w, mask=m_t[:, None] & m_k3[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_v += tl.dot(b_w, tl.trans(b_h3).to(b_w.dtype))
+                b_v += tl.dot(b_w, tl.trans(b_h3).to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_v += tl.dot(b_w, b_h3.to(b_w.dtype))
+                b_v += tl.dot(b_w, b_h3.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 192:
             p_w = w + o_t[:, None] * (HV*K) + o_k4[None, :]
             b_w = tl.load(p_w, mask=m_t[:, None] & m_k4[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_v += tl.dot(b_w, tl.trans(b_h4).to(b_w.dtype))
+                b_v += tl.dot(b_w, tl.trans(b_h4).to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_v += tl.dot(b_w, b_h4.to(b_w.dtype))
+                b_v += tl.dot(b_w, b_h4.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         p_v = v + o_t[:, None] * (HV*V) + o_v[None, :]
         b_v = tl.load(p_v, mask=m_t[:, None] & m_v[None, :], other=0.0) - b_v
 
@@ -279,30 +283,30 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
         p_k = k + o_k1[:, None] + o_t[None, :] * (H*K)
         b_k = tl.load(p_k, mask=m_k1[:, None] & m_t[None, :], other=0.0)
         if STATE_V_FIRST:
-            b_h1 += tl.trans(tl.dot(b_k, b_v))
+            b_h1 += tl.trans(tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION))
         else:
-            b_h1 += tl.dot(b_k, b_v)
+            b_h1 += tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION)
         if K > 64:
             p_k = k + o_k2[:, None] + o_t[None, :] * (H*K)
             b_k = tl.load(p_k, mask=m_k2[:, None] & m_t[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_h2 += tl.trans(tl.dot(b_k, b_v))
+                b_h2 += tl.trans(tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION))
             else:
-                b_h2 += tl.dot(b_k, b_v)
+                b_h2 += tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION)
         if K > 128:
             p_k = k + o_k3[:, None] + o_t[None, :] * (H*K)
             b_k = tl.load(p_k, mask=m_k3[:, None] & m_t[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_h3 += tl.trans(tl.dot(b_k, b_v))
+                b_h3 += tl.trans(tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION))
             else:
-                b_h3 += tl.dot(b_k, b_v)
+                b_h3 += tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION)
         if K > 192:
             p_k = k + o_k4[:, None] + o_t[None, :] * (H*K)
             b_k = tl.load(p_k, mask=m_k4[:, None] & m_t[None, :], other=0.0)
             if STATE_V_FIRST:
-                b_h4 += tl.trans(tl.dot(b_k, b_v))
+                b_h4 += tl.trans(tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION))
             else:
-                b_h4 += tl.dot(b_k, b_v)
+                b_h4 += tl.dot(b_k, b_v, input_precision=FP32_DOT_PRECISION)
 
     if STORE_FINAL_STATE:
         if STATE_V_FIRST:
@@ -529,9 +533,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             o_k1 = tl.arange(0, 64)
             b_gk_last1 = tl.load(gk + last_idx * HV*K + o_k1, mask=(o_k1 < K), other=0.).to(tl.float32)
         if STATE_V_FIRST:
-            b_dv = tl.dot(b_k, tl.trans(b_dh1).to(b_k.dtype))
+            b_dv = tl.dot(b_k, tl.trans(b_dh1).to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
         else:
-            b_dv = tl.dot(b_k, b_dh1.to(b_k.dtype))
+            b_dv = tl.dot(b_k, b_dh1.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
 
         if K > 64:
             p_k = k + o_t[:, None] * (H*K) + o_k2[None, :]
@@ -539,9 +543,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             if USE_GK:
                 b_gk_last2 = tl.load(gk + last_idx * HV*K + o_k2, mask=(o_k2 < K), other=0.).to(tl.float32)
             if STATE_V_FIRST:
-                b_dv += tl.dot(b_k, tl.trans(b_dh2).to(b_k.dtype))
+                b_dv += tl.dot(b_k, tl.trans(b_dh2).to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_dv += tl.dot(b_k, b_dh2.to(b_k.dtype))
+                b_dv += tl.dot(b_k, b_dh2.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
 
         if K > 128:
             p_k = k + o_t[:, None] * (H*K) + o_k3[None, :]
@@ -549,9 +553,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             if USE_GK:
                 b_gk_last3 = tl.load(gk + last_idx * HV*K + o_k3, mask=(o_k3 < K), other=0.).to(tl.float32)
             if STATE_V_FIRST:
-                b_dv += tl.dot(b_k, tl.trans(b_dh3).to(b_k.dtype))
+                b_dv += tl.dot(b_k, tl.trans(b_dh3).to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_dv += tl.dot(b_k, b_dh3.to(b_k.dtype))
+                b_dv += tl.dot(b_k, b_dh3.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
 
         if K > 192:
             p_k = k + o_t[:, None] * (H*K) + o_k4[None, :]
@@ -559,9 +563,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             if USE_GK:
                 b_gk_last4 = tl.load(gk + last_idx * HV*K + o_k4, mask=(o_k4 < K), other=0.).to(tl.float32)
             if STATE_V_FIRST:
-                b_dv += tl.dot(b_k, tl.trans(b_dh4).to(b_k.dtype))
+                b_dv += tl.dot(b_k, tl.trans(b_dh4).to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
             else:
-                b_dv += tl.dot(b_k, b_dh4.to(b_k.dtype))
+                b_dv += tl.dot(b_k, b_dh4.to(b_k.dtype), input_precision=FP32_DOT_PRECISION)
 
         if USE_G:
             b_dv *= tl.where(m_t, exp2(bg_last - b_g), 0)[:, None]
@@ -582,9 +586,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
             else:
                 b_dh1 *= exp2(b_gk_last1[:, None])
         if STATE_V_FIRST:
-            b_dh1 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+            b_dh1 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION))
         else:
-            b_dh1 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+            b_dh1 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 64:
             p_q = q + o_k2[:, None] + o_t[None, :] * (H*K)
             p_w = w + o_k2[:, None] + o_t[None, :] * (HV*K)
@@ -599,9 +603,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 else:
                     b_dh2 *= exp2(b_gk_last2[:, None])
             if STATE_V_FIRST:
-                b_dh2 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh2 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION))
             else:
-                b_dh2 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh2 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 128:
             p_q = q + o_k3[:, None] + o_t[None, :] * (H*K)
             p_w = w + o_k3[:, None] + o_t[None, :] * (HV*K)
@@ -616,9 +620,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 else:
                     b_dh3 *= exp2(b_gk_last3[:, None])
             if STATE_V_FIRST:
-                b_dh3 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh3 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION))
             else:
-                b_dh3 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh3 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
         if K > 192:
             p_q = q + o_k4[:, None] + o_t[None, :] * (H*K)
             p_w = w + o_k4[:, None] + o_t[None, :] * (HV*K)
@@ -633,9 +637,9 @@ def chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64(
                 else:
                     b_dh4 *= exp2(b_gk_last4[:, None])
             if STATE_V_FIRST:
-                b_dh4 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype)))
+                b_dh4 += tl.trans(tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION))
             else:
-                b_dh4 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype)) * scale - tl.dot(b_w, b_dv.to(b_w.dtype))
+                b_dh4 += tl.dot(b_q.to(b_q.dtype), b_do.to(b_q.dtype), input_precision=FP32_DOT_PRECISION) * scale - tl.dot(b_w, b_dv.to(b_w.dtype), input_precision=FP32_DOT_PRECISION)
 
     if USE_INITIAL_STATE:
         if STATE_V_FIRST:
