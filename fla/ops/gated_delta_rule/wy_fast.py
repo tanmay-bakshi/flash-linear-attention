@@ -5,25 +5,41 @@
 # For a list of all contributors, visit:
 #   https://github.com/fla-org/flash-linear-attention/graphs/contributors
 
+from typing import cast
+
 import torch
 import triton
 import triton.language as tl
-
-from fla.utils import IS_TF32_SUPPORTED
-
-FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
 
 from fla.ops.backends import dispatch
 from fla.ops.utils import prepare_chunk_indices
 from fla.ops.utils.cache import fla_cache_autotune
 from fla.ops.utils.op import exp2
-from fla.utils import IS_NVIDIA_BLACKWELL, autotune_cache_kwargs, check_shared_mem
+from fla.utils import IS_NVIDIA_BLACKWELL, IS_TF32_SUPPORTED, autotune_cache_kwargs, check_shared_mem
 
-# Blackwell can select unstable Triton configs for prepare_wy_repr_bwd_kernel
-# during autotuning (see #913). Restrict it to the config that has been
-# validated on B200 until the wider config space is re-validated.
-PREPARE_WY_REPR_BWD_NUM_WARPS = [2] if IS_NVIDIA_BLACKWELL else [2, 4]
-PREPARE_WY_REPR_BWD_NUM_STAGES = [4] if IS_NVIDIA_BLACKWELL else [2, 3, 4]
+FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
+IS_NVIDIA_SM103 = IS_NVIDIA_BLACKWELL and torch.cuda.get_device_capability() == (10, 3)
+
+
+def _prune_prepare_wy_bwd_configs(
+    configs: list[triton.Config], named_args: dict[str, object], **kwargs: object,
+) -> list[triton.Config]:
+    """Select the validated launch family for the operand type and architecture.
+
+    :param configs: Candidate compiler configurations.
+    :param named_args: Kernel arguments passed positionally.
+    :param kwargs: Keyword kernel arguments and autotuner metadata.
+    :returns: Configurations supported by the active device and operand type.
+    """
+    if not IS_NVIDIA_BLACKWELL:
+        return [config for config in configs if config.num_stages != 1]
+    k = cast(torch.Tensor, (named_args | kwargs)['k'])
+    if IS_NVIDIA_SM103 and k.dtype == torch.float32:
+        # Four warps enable native tensor memory MMA; two warps spill thousands
+        # of registers for the FP32 WY products on SM103.
+        return [config for config in configs if config.num_warps == 4 and config.num_stages == 1]
+    # Issue #913 limits the validated family on other Blackwell configurations.
+    return [config for config in configs if config.num_warps == 2 and config.num_stages == 4]
 
 
 @triton.heuristics({
@@ -113,10 +129,11 @@ def recompute_w_u_fwd_kernel(
 @fla_cache_autotune(
     configs=[
         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
-        for num_warps in PREPARE_WY_REPR_BWD_NUM_WARPS
-        for num_stages in PREPARE_WY_REPR_BWD_NUM_STAGES
+        for num_warps in [2, 4]
+        for num_stages in [1, 2, 3, 4]
     ],
     key=['H', 'HV', 'K', 'V', 'BT', 'BK', 'BV', 'IS_VARLEN'],
+    prune_configs_by={'early_config_prune': _prune_prepare_wy_bwd_configs},
     **autotune_cache_kwargs,
 )
 @triton.jit(do_not_specialize=['T'])
@@ -221,8 +238,9 @@ def prepare_wy_repr_bwd_kernel(
     if USE_G:
         b_dA *= exp2(b_g[:, None] - b_g[None, :])
 
-    b_A = tl.zeros([BT, BT], dtype=tl.float32)
     b_dA = tl.where(m_A, -b_dA, 0).to(k.dtype.element_ty)
+    if USE_G and k.dtype.element_ty != tl.float32:
+        b_A = tl.zeros([BT, BT], dtype=tl.float32)
 
     tl.debug_barrier()
     for i_k in range(tl.cdiv(K, BK)):
@@ -231,23 +249,29 @@ def prepare_wy_repr_bwd_kernel(
         p_k = k + (bos*H + i_h // (HV // H)) * K + o_t[:, None] * (H*K) + o_k[None, :]
         p_dk = dk + (bos*HV + i_h) * K + o_t[:, None] * (HV*K) + o_k[None, :]
         b_k = tl.load(p_k, mask=m_k, other=0.0)
-        b_kt = tl.trans(b_k)
         b_kb = b_k * b_b[:, None]
 
-        b_A += tl.dot(b_k, b_kt, input_precision=FP32_DOT_PRECISION)
         b_dkb = tl.dot(b_dA, b_k, input_precision=FP32_DOT_PRECISION)
         b_db += tl.sum(b_dkb * b_k, 1)
-        b_dk = b_dkb * b_b[:, None] + tl.trans(tl.dot(tl.trans(b_kb).to(b_dA.dtype), b_dA, input_precision=FP32_DOT_PRECISION))
+        b_dk_right = tl.trans(tl.dot(tl.trans(b_kb).to(b_dA.dtype), b_dA, input_precision=FP32_DOT_PRECISION))
+        if USE_G and k.dtype.element_ty == tl.float32:
+            # For D = dA, the row/column gate contractions are beta*(D@K)*K
+            # and (D.T@(beta*K))*K. Both key products are already needed for dk.
+            b_dg += tl.sum((b_dkb * b_b[:, None] - b_dk_right) * b_k, 1)
+        elif USE_G:
+            # Rounded beta*K dot operands cannot be reused for the gate gradient.
+            b_A += tl.dot(b_k, tl.trans(b_k), input_precision=FP32_DOT_PRECISION)
+        b_dk = b_dkb * b_b[:, None] + b_dk_right
         b_dk += tl.load(p_dk, mask=m_k, other=0.0)
 
         tl.store(p_dk, b_dk.to(p_dk.dtype.element_ty), mask=m_k)
     tl.store(p_db, b_db.to(p_db.dtype.element_ty), mask=m_t)
 
-    b_A *= b_b[:, None]
     if USE_G:
-        b_AdA = b_dA * b_A
+        if k.dtype.element_ty != tl.float32:
+            b_AdA = b_dA * (b_A * b_b[:, None])
+            b_dg += tl.sum(b_AdA, axis=1) - tl.sum(b_AdA, axis=0)
         p_dg = dg + (bos*HV + i_h) + o_t * HV
-        b_dg += tl.sum(b_AdA, axis=1) - tl.sum(b_AdA, axis=0)
         tl.store(p_dg, b_dg.to(p_dg.dtype.element_ty), mask=m_t)
 
 
@@ -302,16 +326,18 @@ def prepare_wy_repr_bwd(
     A: torch.Tensor,
     dw: torch.Tensor,
     du: torch.Tensor,
-    g: torch.Tensor = None,
+    g: torch.Tensor | None = None,
     cu_seqlens: torch.LongTensor | None = None,
     chunk_indices: torch.LongTensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     B, T, H, K, V, HV = *k.shape, v.shape[-1], v.shape[2]
     BT = A.shape[-1]
     if chunk_indices is None and cu_seqlens is not None:
         chunk_indices = prepare_chunk_indices(cu_seqlens, BT)
     NT = triton.cdiv(T, BT) if cu_seqlens is None else len(chunk_indices)
     CONST_TILING = 64 if check_shared_mem() else 32
+    if IS_NVIDIA_SM103 and k.dtype == torch.float32:
+        CONST_TILING = 32
     BK = min(max(triton.next_power_of_2(K), 16), CONST_TILING)
     BV = min(max(triton.next_power_of_2(V), 16), CONST_TILING)
 
