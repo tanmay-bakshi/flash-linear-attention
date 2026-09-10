@@ -16,7 +16,8 @@ FP32_DOT_PRECISION = tl.constexpr('tf32x3' if IS_TF32_SUPPORTED else 'ieee')
 from fla.ops.backends import dispatch
 from fla.ops.common.chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
 from fla.ops.gated_delta_rule.wy_fast import recompute_w_u_fwd
-from fla.ops.utils import prepare_chunk_indices, solve_tril
+from fla.ops.utils import prepare_chunk_indices
+from fla.ops.utils.solve_tril import solve_tril
 from fla.ops.utils.cache import fla_cache_autotune
 from fla.ops.utils.op import exp2
 from fla.utils import IS_TF32_SUPPORTED, autotune_cache_kwargs
