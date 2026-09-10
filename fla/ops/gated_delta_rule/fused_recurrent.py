@@ -25,6 +25,7 @@ from fla.utils import input_guard
     'IS_VARLEN': lambda args: args['cu_seqlens'] is not None,
     'USE_GATE_IN_KERNEL': lambda args: args['A_log'] is not None,
     'HAS_DT_BIAS': lambda args: args['dt_bias'] is not None,
+    'INDEXED_STATE': lambda args: args['state_indices'] is not None,
 })
 @triton.jit(do_not_specialize=['T'])
 def fused_recurrent_gated_delta_rule_fwd_kernel(
@@ -41,6 +42,7 @@ def fused_recurrent_gated_delta_rule_fwd_kernel(
     h0,
     ht,
     cu_seqlens,
+    state_indices,
     scale,
     T,
     H: tl.constexpr,
@@ -62,10 +64,13 @@ def fused_recurrent_gated_delta_rule_fwd_kernel(
     HAS_DT_BIAS: tl.constexpr,
     APPLY_BETA_SIGMOID: tl.constexpr,
     ALLOW_NEG_EIGVAL: tl.constexpr,
+    INDEXED_STATE: tl.constexpr,
 ):
     i_v, i_nh = tl.program_id(0), tl.program_id(1)
     i_n, i_hv = i_nh // HV, i_nh % HV
     i_h = i_hv // (HV // H)
+    i_state = tl.load(state_indices + i_n).to(tl.int64) if INDEXED_STATE else i_n
+    i_state_h = i_state * HV + i_hv
 
     if IS_VARLEN:
         bos, eos = tl.load(cu_seqlens + i_n).to(tl.int64), tl.load(cu_seqlens + i_n + 1).to(tl.int64)
@@ -104,9 +109,9 @@ def fused_recurrent_gated_delta_rule_fwd_kernel(
         b_h = tl.zeros([BK, BV], dtype=tl.float32)
     if USE_INITIAL_STATE:
         if STATE_V_FIRST:
-            p_h0 = h0 + i_nh * K*V + o_v[:, None] * K + o_k[None, :]
+            p_h0 = h0 + i_state_h * K*V + o_v[:, None] * K + o_k[None, :]
         else:
-            p_h0 = h0 + i_nh * K*V + o_k[:, None] * V + o_v[None, :]
+            p_h0 = h0 + i_state_h * K*V + o_k[:, None] * V + o_v[None, :]
         b_h += tl.load(p_h0, mask=mask_h, other=0).to(tl.float32)
 
     for _ in tl.range(0, T):
@@ -173,9 +178,9 @@ def fused_recurrent_gated_delta_rule_fwd_kernel(
 
     if STORE_FINAL_STATE:
         if STATE_V_FIRST:
-            p_ht = ht + i_nh * K*V + o_v[:, None] * K + o_k[None, :]
+            p_ht = ht + i_state_h * K*V + o_v[:, None] * K + o_k[None, :]
         else:
-            p_ht = ht + i_nh * K*V + o_k[:, None] * V + o_v[None, :]
+            p_ht = ht + i_state_h * K*V + o_k[:, None] * V + o_v[None, :]
         tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
 
 
@@ -198,6 +203,7 @@ def fused_recurrent_gated_delta_rule_fwd(
     state_v_first: bool = False,
     cu_seqlens: torch.LongTensor | None = None,
     inplace_final_state: bool = False,
+    state_indices: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     B, T, H, K, V = *k.shape, v.shape[-1]
     HV = v.shape[2]
@@ -232,6 +238,7 @@ def fused_recurrent_gated_delta_rule_fwd(
         h0=initial_state,
         ht=final_state,
         cu_seqlens=cu_seqlens,
+        state_indices=state_indices,
         scale=scale,
         T=T,
         H=H,
@@ -275,6 +282,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
         state_v_first: bool = False,
         cu_seqlens: torch.LongTensor | None = None,
         inplace_final_state: bool = False,
+        state_indices: torch.Tensor | None = None,
     ):
         o, final_state = fused_recurrent_gated_delta_rule_fwd(
             q=q,
@@ -295,6 +303,7 @@ class FusedRecurrentFunction(torch.autograd.Function):
             state_v_first=state_v_first,
             cu_seqlens=cu_seqlens,
             inplace_final_state=inplace_final_state,
+            state_indices=state_indices,
         )
 
         return o, final_state
@@ -329,6 +338,7 @@ def fused_recurrent_gated_delta_rule(
     state_v_first: bool = False,
     cu_seqlens: torch.LongTensor | None = None,
     inplace_final_state: bool = False,
+    state_indices: torch.Tensor | None = None,
     **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     r"""
@@ -385,6 +395,11 @@ def fused_recurrent_gated_delta_rule(
         inplace_final_state (bool):
             Write the final state into `initial_state` instead of a new tensor, so decoding steps carry their
             state without copies. Requires `initial_state` and `output_final_state=True`. Default: `False`.
+        state_indices (torch.Tensor):
+            Optional int64 vector mapping each input sequence to its persistent state row.
+            Requires `inplace_final_state=True`. Indices must be distinct and in bounds;
+            the caller owns those invariants so graph replay needs no host synchronization.
+            Unselected state rows remain untouched. Default: `None`.
         cu_seqlens (torch.LongTensor):
             Cumulative sequence lengths of shape `[N+1]` used for variable-length training,
             consistent with the FlashAttention API.
@@ -440,11 +455,19 @@ def fused_recurrent_gated_delta_rule(
                 f"The batch size is expected to be 1 rather than {q.shape[0]} when using `cu_seqlens`."
                 f"Please flatten variable-length inputs before processing.",
             )
-        if initial_state is not None and initial_state.shape[0] != len(cu_seqlens) - 1:
+        if state_indices is None and initial_state is not None and initial_state.shape[0] != len(cu_seqlens) - 1:
             raise ValueError(
                 f"The number of initial states is expected to be equal to the number of input sequences, "
                 f"i.e., {len(cu_seqlens) - 1} rather than {initial_state.shape[0]}.",
             )
+    if state_indices is not None:
+        sequences = q.shape[0] if cu_seqlens is None else len(cu_seqlens) - 1
+        if not inplace_final_state:
+            raise ValueError("`state_indices` requires `inplace_final_state=True`.")
+        if state_indices.shape != (sequences,) or state_indices.dtype != torch.int64:
+            raise ValueError("`state_indices` must be an int64 vector with one index per sequence.")
+        if state_indices.device != q.device or not state_indices.is_contiguous():
+            raise ValueError("`state_indices` must be contiguous and on the input device.")
     if scale is None:
         scale = k.shape[-1] ** -0.5
     if beta is None:
@@ -484,6 +507,7 @@ def fused_recurrent_gated_delta_rule(
         state_v_first,
         cu_seqlens,
         inplace_final_state,
+        state_indices,
     )
     return o, final_state
 
