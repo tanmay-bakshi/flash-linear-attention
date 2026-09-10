@@ -125,6 +125,6 @@ def test_chunk_dqkwg_fp32_vjp(
             continue
         assert got is not None, name
         want = torch.cat(pieces).unsqueeze(0)
-        relative = (got.double() - want).norm() / want.norm().clamp_min(1e-12)
+        relative = float(((got.double() - want).norm() / want.norm().clamp_min(1e-12)).detach())
         assert relative < 2e-5, (name, relative)
         torch.testing.assert_close(got.double(), want, atol=2e-5, rtol=2e-4)
